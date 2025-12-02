@@ -4,6 +4,7 @@ def COLOR_MAP = [
 ]
 
 pipeline {
+    agent any
 
     environment {
         NEXUSPASS = credentials('nexuslogin')
