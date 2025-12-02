@@ -4,6 +4,7 @@ def COLOR_MAP = [
 ]
 
 pipeline {
+
     agent any
 
     tools {
@@ -24,6 +25,9 @@ pipeline {
         SONARSERVER    = 'sonarserver'
         SONARSCANNER   = 'sonar7.3'
         NEXUSPASS      = credentials('nexuslogin')
+
+        // FIX: Proper timestamp for Nexus + Ansible
+        BUILD_TIME = "${new Date().format('yyyyMMdd-HHmmss')}"
     }
 
     stages {
@@ -54,22 +58,25 @@ pipeline {
 
         stage('Sonar Analysis') {
             tools {
-                jdk "JDK11"        // **** Sonar stage uses Java 11 ****
+                jdk "JDK11"
             }
             environment {
                 scannerHome = tool "${SONARSCANNER}"
             }
             steps {
-               withSonarQubeEnv("${SONARSERVER}") {
-                   sh '''${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=vprofile \
-                       -Dsonar.projectName=vprofile \
-                       -Dsonar.projectVersion=1.0 \
-                       -Dsonar.sources=src/ \
-                       -Dsonar.java.binaries=target/test-classes/com/visualpathit/account/controllerTest/ \
-                       -Dsonar.junit.reportsPath=target/surefire-reports/ \
-                       -Dsonar.jacoco.reportsPath=target/jacoco.exec \
-                       -Dsonar.java.checkstyle.reportPaths=target/checkstyle-result.xml'''
-               }
+                withSonarQubeEnv("${SONARSERVER}") {
+                    sh '''
+                        ${scannerHome}/bin/sonar-scanner \
+                        -Dsonar.projectKey=vprofile \
+                        -Dsonar.projectName=vprofile \
+                        -Dsonar.projectVersion=1.0 \
+                        -Dsonar.sources=src/ \
+                        -Dsonar.java.binaries=target/classes \
+                        -Dsonar.junit.reportsPath=target/surefire-reports/ \
+                        -Dsonar.jacoco.reportsPath=target/jacoco.exec \
+                        -Dsonar.java.checkstyle.reportPaths=target/checkstyle-result.xml
+                    '''
+                }
             }
         }
 
@@ -81,29 +88,35 @@ pipeline {
             }
         }
 
-        stage("UploadArtifact") {
+        stage("Upload Artifact to Nexus") {
             steps {
-                nexusArtifactUploader(
-                    nexusVersion: 'nexus3',
-                    protocol: 'http',
-                    nexusUrl: "${NEXUSIP}:${NEXUSPORT}",
-                    groupId: 'QA',
-                    version: "${env.BUILD_ID}-${env.BUILD_TIMESTAMP}",
-                    repository: "${RELEASE_REPO}",
-                    credentialsId: "${NEXUS_LOGIN}",
-                    artifacts: [
-                        [
+                script {
+                    def ARTIFACT_VERSION = "${env.BUILD_ID}-${env.BUILD_TIME}"
+
+                    nexusArtifactUploader(
+                        nexusVersion: 'nexus3',
+                        protocol: 'http',
+                        nexusUrl: "${NEXUSIP}:${NEXUSPORT}",
+                        groupId: 'QA',
+                        version: ARTIFACT_VERSION,
+                        repository: "${RELEASE_REPO}",
+                        credentialsId: "${NEXUS_LOGIN}",
+                        artifacts: [[
                             artifactId: 'vproapp',
                             classifier: '',
                             file: 'target/vprofile-v2.war',
                             type: 'war'
-                        ]
-                    ]
-                )
+                        ]]
+                    )
+
+                    // Export final version for Ansible
+                    env.FINAL_WAR = "vproapp-${ARTIFACT_VERSION}.war"
+                    env.ARTIFACT_FOLDER = ARTIFACT_VERSION
+                }
             }
         }
 
-        stage('Ansible Deploy to staging') {
+        stage('Ansible Deploy to Staging') {
             steps {
                 ansiblePlaybook([
                     inventory   : 'ansible/stage.inventory',
@@ -112,16 +125,18 @@ pipeline {
                     colorized   : true,
                     credentialsId: 'applogin',
                     disableHostKeyChecking: true,
+
                     extraVars: [
                         USER: "admin",
                         PASS: "${NEXUSPASS}",
-                        nexusip: "172.31.2.175",
-                        reponame: "vprofile-repo",
+                        nexusip: "${NEXUSIP}",
+                        reponame: "${RELEASE_REPO}",
                         groupid: "QA",
-                        time: "${env.BUILD_TIMESTAMP}",
-                        build: "${env.BUILD_ID}",
+
+                        // FIXED — PERFECT MATCH FOR NEXUS STRUCTURE
                         artifactid: "vproapp",
-                        vprofile_version: "vproapp-${env.BUILD_ID}-${env.BUILD_TIMESTAMP}.war"
+                        build: "${env.ARTIFACT_FOLDER}",
+                        vprofile_version: "${env.FINAL_WAR}"
                     ]
                 ])
             }
@@ -134,7 +149,7 @@ pipeline {
             echo 'Slack Notifications.'
             slackSend channel: '#devopscicd',
                 color: COLOR_MAP[currentBuild.currentResult],
-                message: "*${currentBuild.currentResult}:* Job ${env.JOB_NAME} build ${env.BUILD_NUMBER} \nMore info at: ${env.BUILD_URL}"
+                message: "*${currentBuild.currentResult}:* Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\nMore info: ${env.BUILD_URL}"
         }
     }
 }
