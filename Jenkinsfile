@@ -23,7 +23,7 @@ pipeline {
         NEXUS_LOGIN    = 'nexuslogin'
         SONARSERVER    = 'sonarserver'
         SONARSCANNER   = 'sonar7.3'
-        NEXUSPASS      = credentials('nexuspass')
+        NEXUSPASS      = credentials('nexuslogin')
     }
 
     stages {
@@ -115,7 +115,7 @@ pipeline {
                     extraVars: [
                         USER: "admin",
                         PASS: "${NEXUSPASS}",
-                        nexusip: "172.31.2.139",
+                        nexusip: "172.31.2.175",
                         reponame: "vprofile-repo",
                         groupid: "QA",
                         time: "${env.BUILD_TIMESTAMP}",
