@@ -54,7 +54,7 @@ pipeline {
 
         stage('Sonar Analysis') {
             tools {
-                jdk "JDK11"        // *** Sonar stage uses Java 11 ***
+                jdk "JDK11"        // **** Sonar stage uses Java 11 ****
             }
             environment {
                 scannerHome = tool "${SONARSCANNER}"
